@@ -1,17 +1,28 @@
 import random
-from collections import Counter
+import multiprocessing
+import os
+import sys
 import matplotlib.pyplot as plt
+from collections import Counter
 from litemapy import Schematic, BlockState
 
 blocks_to_track = ["minecraft:copper_block", "minecraft:exposed_copper", "minecraft:weathered_copper", "minecraft:oxidized_copper"]
+plot_interval = 100
+random_tick_chance_per_block=3/(16**3)
+warp_ticks=72000*8
+
 
 def load_schematic(file_path):
     schem = Schematic.load(file_path)
     if len(schem.regions.values())!=1: raise Exception("Only litematics with 1 region supported")
     return schem
 
-def analyse_schematic(schem):
+
+def analyse_schematic(schem, name):
     region = next(iter(schem.regions.values()))
+
+    data_history = {block_id: [] for block_id in blocks_to_track}
+    iterations = []
 
     # collect initial copper positions
     copper_positions = []
@@ -22,21 +33,20 @@ def analyse_schematic(schem):
                 if block.id == "minecraft:copper_block":
                     copper_positions.append((x, y, z))
 
-    plot_interval = 100
-    random_tick_chance_per_block=3/(16**3)
-    warp_ticks=72000*8
     for i in range(warp_ticks):
         for position in copper_positions:
             if random.random() < random_tick_chance_per_block:
                 randomtick(position, region)
         if i % plot_interval==0:
-            collect_data(copper_positions, region, i)
-    plot_data()
+            collect_data(copper_positions, region, i, data_history, iterations)
+    plot_data(data_history, iterations, name)
 
-def plot_data():
+
+def plot_data(data_history, iterations, name):
     fig, ax = plt.subplots()
     ax.set_xlabel("Hours")
     ax.set_ylabel("Percentage of Blocks")
+    plt.gcf().canvas.manager.set_window_title(name)
 
     for block_id, values in data_history.items():
         if len(iterations) > 1:
@@ -45,10 +55,8 @@ def plot_data():
     ax.legend()
     plt.show()
 
-data_history = {block_id: [] for block_id in blocks_to_track}
-iterations = []
 
-def collect_data(copper_positions, region, i):
+def collect_data(copper_positions, region, i, data_history, iterations):
     counts = Counter(region[pos].id for pos in copper_positions)
     iterations.append(i/72000)
 
@@ -101,9 +109,33 @@ def id_to_level(id):
         case _:
             return -1
 
+
 def level_to_id(level):
     return blocks_to_track[level]
 
+
 if __name__ == '__main__':
-    path = r'/home/faulesvltir/.local/share/PrismLauncher/schematics/temp/copper/copper_test_layout_2.litematic'
-    analyse_schematic(load_schematic(path))
+    #Enter schematic directory containing all flies that shell be tested
+    if len(sys.argv) < 2:
+        print("Error: Please Enter schematic directory.")
+        sys.exit(1)
+
+    directory_path = sys.argv[1]
+
+    if not os.path.isdir(directory_path):
+        print(f"Error: {directory_path} is not a valid directory")
+        sys.exit(1)
+
+    processes = []
+
+    for filename in os.listdir(directory_path):
+        if filename.endswith(".litematic"):
+            file_path = os.path.join(directory_path, filename)
+            name = os.path.splitext(filename)[0]  # remove ".litematic" ending
+            p = multiprocessing.Process(target=analyse_schematic, args=(load_schematic(file_path), name))
+            p.start()
+            processes.append(p)
+
+    # Wait for finish
+    for p in processes:
+        p.join()
